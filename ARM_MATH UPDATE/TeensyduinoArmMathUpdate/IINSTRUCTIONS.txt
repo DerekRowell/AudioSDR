@@ -1,0 +1,22 @@
+
+This zip file contains five files that will give access to arm_math Ver. 4.5.0 functions required for 
+AudioSDR to work.
+1) Install the latest version of Arduino
+
+2) Install the latest verion of Teensyduino on top of Arduino
+
+3) Copy the files
+     arm_common_tables.h
+     arm_const_structs.h
+     arm_math.h
+from this zip file to /--/Arduino/hardware/teensy/avr/cores/teensy3
+where /--/ is the root of your Arduino environment, in my case it is C:ProgramFiles(x86)/Arduino/...
+
+4) Copy the two files 
+     libarm_cortexM4l_math.a
+     libarm_cortexM4lf_math.a
+  from this zip file to /--/Arduino/hardware/tools/arm/arm-none-eabi/lib/
+
+and you should be good to go!  To test, try compiling BareBonesWSPR.ino
+
+D. R.    Aug. 22, 2019
