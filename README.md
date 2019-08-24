@@ -1,5 +1,6 @@
 # AudioSDR
- A single Teensy Audio Library class object for a complete SDR demod/processor
+ A single Teensy Audio Library class object for a complete SDR (software-defined-radio)
+ demod/processor.
    - Creates a dual-conversion receiver with an IF at approx. 7kHz
    - Contains demodulators for CW/SSB/AM/SAM and a WSPR mode
    - Contains an impulse noise blanker, AGC, ALS (adaptive-least-squares)
