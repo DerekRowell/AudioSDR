@@ -80,7 +80,6 @@ void AudioIQgenerator::update(void)
     blockI->data[i] = ((int16_t)(Idata[i]*32767.0*gainI));
     blockQ->data[i] = ((int16_t)(Qdata[i]*32767.0*gainQ));
   }
-  //  Serial.println( micros() -t0);
   transmit(blockI, 0);
   release(blockI);
   transmit(blockQ, 1);

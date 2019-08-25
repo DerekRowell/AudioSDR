@@ -57,7 +57,7 @@ void AudioSDR::update(void) {
           /*********************************************************************
           *                         --- IMPORTANT ---                          * 
           *  The convention adopted for all SDR quadrature blocks is that      *
-          *  the in-phase (I) channel is  on I2S input 0  (left), and the     *
+          *  the in-phase (I)I channel is  on I2S input 0  (left), and the     *
           *  quadrature (Q) channel is on I2S input 1 (right).                 *
           *  Demodulation will not be successful if this condition is not met. *
           *********************************************************************/
@@ -81,7 +81,7 @@ void AudioSDR::update(void) {
   //   --- DEMODULATION ---
   //  ----------------------
   // --- Hartley ("phase-shift") SSB/CW demodulation:
-  if ((_mode==USBmode) || (_mode==LSBmode) || (_mode==CW_USBmode) || (_mode==CW_LSBmode)) {
+  if ((_mode==USBmode) || (_mode==LSBmode) || (_mode==CW_USBmode) || (_mode==CW_LSBmode) || ( _mode==WSPRmode)) {
     // --- Shift the IF band down to baseband
     phase_SSB = freq_shifter(_Idata, _Qdata, -_freq_shift, phase_SSB);
     //
@@ -113,13 +113,13 @@ void AudioSDR::update(void) {
     //
     // --- Combine the I and Q channels to form the SSB demodulated audio:
     for (int i = 0; i < n_block; i++) {
-      if      ((_mode == USBmode) || (_mode == CW_USBmode)) _audioOut[i] = _Idata[i] - _Qdata[i];
-      else if ((_mode == LSBmode) || (_mode == CW_LSBmode)) _audioOut[i] = _Idata[i] + _Qdata[i];
+      if      ((_mode == USBmode) || (_mode == CW_USBmode) || (_mode == WSPRmode)) _audioOut[i] = _Idata[i] - _Qdata[i];
+      else if ((_mode == LSBmode) || (_mode == CW_LSBmode))                        _audioOut[i] = _Idata[i] + _Qdata[i];
     }
   }
   //
   // --- AM demodulation: ---
-  else if (_mode == AMmode || _mode == SAMmode) {
+  else if ((_mode == AMmode) || (_mode == SAMmode)) {
     // --- Pre-filter with (IIR) elliptical BPF 8 kHz bandwidth
     arm_biquad_cascade_df1_f32(&_IFfilterI, _Idata, _Idata, n_block);
     arm_biquad_cascade_df1_f32(&_IFfilterQ, _Qdata, _Qdata, n_block);
@@ -198,6 +198,12 @@ float32_t AudioSDR::setDemodMode(int newMode) {
     arm_biquad_cascade_df1_init_f32(&_IFfilterI, 4, SSBpre_coefs, _IFfilterStateI);
     arm_biquad_cascade_df1_init_f32(&_IFfilterQ, 4, SSBpre_coefs, _IFfilterStateQ);
   }
+  else if (_mode == WSPRmode) {     // WSPR is USB with "audio" frequency at 1500 Hz, bandwidth +/- 100Hz
+    _freq_shift = _IF_center_freq - _IF_bandwidth_SSB / 2.0;
+    arm_biquad_cascade_df1_init_f32(&_IFfilterI, 4, WSPRpre_coefs, _IFfilterStateI);
+    arm_biquad_cascade_df1_init_f32(&_IFfilterQ, 4, WSPRpre_coefs, _IFfilterStateQ);
+  }
+
   else if (_mode == CW_USBmode) {
     _freq_shift = _IF_center_freq - _IF_bandwidth_CW / 2.0;
     arm_biquad_cascade_df1_init_f32(&_IFfilterI, 4, CWpre_coefs, _IFfilterStateI);
@@ -311,7 +317,7 @@ void AudioSDR::setAudioFilter(int filter) {
 
 /*-------------------------------------------------------------------------*
 *  Note: In order to save execution time this implementation only updates  * 
-*  the ALS filter coefficients every "iteration_count" iterations. This   * 
+*  the ALS filter coefficients every "iteration_count" iterat5ions. This   * 
 *  will slow convergence of the filter, but with iteration count = 4 the   * 
 *  execution time is reduced from 730 usecs to 368 usecs.                  *
 *-------------------------------------------------------------------------*/

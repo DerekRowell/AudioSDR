@@ -2,7 +2,7 @@
   AudioSDR.h
 
   Function: A single Teensy 3.6 Audio block for demodulation of direct conversion SDR receivers
-            Based on Teensy 3.x Audio library functions 
+            Based on Teensy 3.x Audio library functions Copyright(c) 2014, Paul Stoffregen
 
   Author:   Derek Rowell
   Date:     August 17, 2019
@@ -48,6 +48,7 @@
 #define CW_USBmode   3
 #define AMmode       4
 #define SAMmode      5
+#define WSPRmode     6
 // -- arm_math definitions
 #define FORWARD      0
 #define INVERSE      1
@@ -625,7 +626,7 @@ class AudioSDR : public AudioStream {
     };
     // ---
     //                           ----------------------------
-    // CW 1kHz IIR BPF filter coefficients  (Iowa Hills, 8th-order (4 SOS sections), Elliptic,
+    // CW 1kHz IF IIR BPF filter coefficients  (Iowa Hills, 8th-order (4 SOS sections), Elliptic,
     // f_c = 6.89kHz,
     // (each row is one filter section)  b0, b1, b2, -a1, -a2
     float32_t CWpre_coefs[20] = {
@@ -636,7 +637,18 @@ class AudioSDR : public AudioStream {
     };
     // ---
     //                           ----------------------------
-    // SSB 3kHz IIR BPF filter coefficients  (Iowa Hills, 8th-order (4 SOS sections), Elliptic,
+    // WSPR 450Hz IF IIR BPF filter coefficients  (Iowa Hills, 8th-order (4 SOS sections), Elliptic,
+    // f_c = 6.89kHz,
+    // (each row is one filter section)  b0, b1, b2, -a1, -a2
+    float32_t WSPRpre_coefs[20] = {
+      0.246084591699641864,  -0.317335335403629515,  0.246084591699641891,  1.107861958121652220,  -0.951304250547790442,
+      0.245839229249974839,  -0.221965241940777630,  0.245839229249974839,  1.059321085368752910,  -0.950355737925846378,
+      0.129614440769847961,  -0.192468008344885394,  0.129614440769847961,  1.155151819152469010,  -0.981250483665057627,
+      0.129501160070902038,  -0.074705318268108167,  0.129501160070902038,  1.043329796116461820,  -0.980392888323285749
+    };
+    // ---
+    //                           ----------------------------
+    // SSB 3kHz IF IIR BPF filter coefficients  (Iowa Hills, 8th-order (4 SOS sections), Elliptic,
     // f_c = 6.89kHz,
     // (each row is one filter section)  b0, b1, b2, -a1, -a2
     float32_t SSBpre_coefs[20] = {
@@ -658,7 +670,7 @@ class AudioSDR : public AudioStream {
     };
     // ---
     //                           ----------------------------
-    // AM 8kHz IIR BPF filter coefficients  (Iowa Hills, 8th-order (4 SOS sections), Elliptic,
+    // AM 8kHz IIR IF BPF filter coefficients  (Iowa Hills, 8th-order (4 SOS sections), Elliptic,
     // f_c = 6.89kHz,
     // (each row is one filter section)  b0, b1, b2, -a1, -a2
     float32_t AMpre_coefs[20] = {
