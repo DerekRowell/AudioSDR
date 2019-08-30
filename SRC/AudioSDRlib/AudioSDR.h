@@ -32,7 +32,7 @@
 ****************************************************************************************************/
 #ifndef audio_sdr_h_
 #define audio_sdr_h_
-//#include "core_pins.h"
+#include "core_pins.h"
 #include "AudioStream.h"
 #include "utility/dspinst.h"
 #include "arm_math.h"
