@@ -43,6 +43,7 @@
 #ifndef Audio_IQ_gen_h_
 #define Audio_IQ_gen_h_
 //
+#include "core_pins.h"
 #include "AudioStream.h"
 #include "Arduino.h"
 #include "arm_math.h"

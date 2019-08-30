@@ -36,12 +36,13 @@
 
 #ifndef audiograbbercomplex256_h_
 #define audiograbbercomplex256_h_
-
+//
+#include "core_pins.h"
 #include "AudioStream.h"
 #include "Arduino.h"
-
+//
 #define BUFFLENGTH 256
-
+//
 class AudioGrabberComplex256 : public AudioStream {
   public:
     AudioGrabberComplex256() : AudioStream(2, inputQueueArray) { }
