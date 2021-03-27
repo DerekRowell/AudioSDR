@@ -1,15 +1,15 @@
 /************************************************************************************************** 
   AudioSDR.h
 
-  Function: A single Teensy 3.6 Audio block for demodulation of direct conversion SDR receivers
-            Based on Teensy 3.x Audio library functions Copyright(c) 2014, Paul Stoffregen
+  Function: A single Teensy 4 Audio block for demodulation of direct conversion SDR receivers
+            Based on Teensy 4 Audio library functions, Copyright(c) 2014, Paul Stoffregen
 
   Author:   Derek Rowell
-  Date:     August 17, 2019
-  Version:  1.0
+  Date:     March 12, 2021
+  Version:  1.1
 
   ---
-  Copyright (c) 2019 Derek Rowell
+  Copyright (c) 2021 Derek Rowell
 
   Permission is hereby granted, free of charge, to any person obtaining a copy
   of this software and associated documentation files (the "Software"), to deal
@@ -38,7 +38,6 @@
 #include "arm_math.h"
 #include "arm_const_structs.h"
 #include "Arduino.h"
-//#include "sdrMath.h"
 #include "Streaming.h"
 
 // -- Demodulation mode definitions
@@ -141,6 +140,7 @@ class AudioSDR : public AudioStream {
     float32_t getAGCbetaRelease(void);
     float32_t getAGClookup(int);
     float32_t getAGCstaticGain(void);
+    float32_t getAMcarrierLevel(void);
     boolean   getAGCmakeUpMode(void);
     //
     // --- Impulse Noise Blanker
@@ -161,10 +161,11 @@ class AudioSDR : public AudioStream {
   private:
     // --- General private variables ---
     audio_block_t *inputQueueArray[2];
-    const float32_t _IF_center_freq   = 6890.0;
-    const float32_t _IF_bandwidth_SSB = 3000.0;
-    const float32_t _IF_bandwidth_CW  = 1000.0;
-    const float32_t _IF_bandwidth_AM  = 8500.0;
+    const float32_t _IF_center_freq     = 6890.0;
+    const float32_t _IF_bandwidth_SSB   = 3000.0;
+    const float32_t _IF_bandwidth_CW    = 1000.0;
+    const float32_t _IF_bandwidth_WSPR  = 1000.0;
+    const float32_t _IF_bandwidth_AM    = 8500.0;
     float32_t _audioOut[128];
     float32_t _Idata[128];
     float32_t _Qdata[128];
@@ -172,7 +173,7 @@ class AudioSDR : public AudioStream {
     float32_t _inGainI         = 1.0f;
     float32_t _inGainQ         = 1.0f;
     float32_t _gainBalance     = 1.0f;
-    float32_t _output_gain     = 1.0;
+    float32_t _output_gain     = 0.5;
     float32_t _outGain         = 1.0f;
     float32_t _currentOutGain  = 1.0f;
     float32_t _dc_offset       = 0.0;
@@ -197,7 +198,7 @@ class AudioSDR : public AudioStream {
     int16_t     _M       = 55;                     // FIR filter length
     int16_t     _delay   = 3;                      // "Decorrelation" delay
     float32_t   _lambda  = 0.5;                    // Coefficient update gain
-    float32_t   _als_in[2 * n_block];              // Input buffer
+    float32_t   _als_in[2*n_block];              // Input buffer
     float32_t   _als_coeffs[n_block];              // FIR filter coefficients
     boolean     _als_is_enabled  = false;
     boolean     _als_is_notch    = true;           // Default operation is a notch filter
@@ -206,6 +207,7 @@ class AudioSDR : public AudioStream {
     //--- Private variables for the AGC processor
     float32_t    _twoPI = 2.0 * PI;
     float32_t    _agc_history[3];
+    float32_t    _agc_AMcarrierLevel;
     float32_t    _agc_alphaAttack;
     float32_t    _agc_alphaRelease;
     float32_t    _agc_attackTime;
@@ -244,15 +246,67 @@ class AudioSDR : public AudioStream {
     boolean     _nb_impulseDetected = false;
     //
     // ------ Private variables for the SAM demodulator
-    const float32_t _alpha_freq       = 0.995;
+      const float32_t twoPI      = 2.0*PI;
+      const float32_t halfPI     = 0.5*PI;
+      const float32_t alpha_freq = 0.995;
+      const float32_t beta_freq  = 1.0 - alpha_freq;
+      const float32_t f_conv     = (AUDIO_SAMPLE_RATE_EXACT/twoPI);
+      float32_t _lock_freq_low    = _IF_center_freq - 1000.0;
+      float32_t _lock_freq_high   = _IF_center_freq + 1000.0;
+
+      // Filter design parameters
+      float32_t   phs = 0.0;
+      float32_t   phs_inc = 0.01;
+      float32_t   wn     = 0.07f;            // PLL bandwidth
+      float32_t   zeta   = 0.707f;           // PLL damping factor - 0.707
+      float32_t   Ka     = 1000.f;           // PLL loop gain
+      float32_t   xReal, xImag;
+      float32_t   yReal, yImag;
+      float32_t   deltaReal, deltaImag;
+      float32_t   phase_error;
+      float32_t   phase_err_filt;
+      float32_t   prev_phase_err_filt;
+      float32_t   a1Int, a2Int;              // q15.1 filter coefficients
+      float32_t   delay0, delay1, delay2;    // filter delay (shift) register
+      float32_t   phase_est      = 0.0;      // PLL estimated output phase
+      float32_t   prev_phase_est = 0.0;      // 
+      float32_t   _PLLfreq       = 0.0;      // PLL estimated output frequency
+      boolean _SAM_PLL_isLocked;
+      boolean isEnabled      = true;
+      boolean quadMode       = true;
+      //
+      float32_t   tau_1 = Ka/(wn*wn);         // PLL filter design specs
+      float32_t   tau_2 = 2*zeta/wn;
+      float32_t   b0    = (2*Ka/tau_1)*(1.0 + 2.0*tau_2);
+      float32_t   b1    = (2*Ka/tau_1)*(1.0 - 2.0*tau_2);
+      float32_t   b2    =  0.0;
+      float32_t   a1    = -1.0;
+      float32_t   a2    =   0.0;
+      //
+      void design_filter(void) {
+        tau_1 = Ka/(wn*wn);            // PLL filter design specs
+        tau_2 = 2*zeta/wn;
+        // Coefficients in the z-domain transfer function
+        b0 = (2*Ka/tau_1)*(1.0 + 2.0*tau_2);
+        b1 = (2*Ka/tau_1)*(1.0 - 2.0*tau_2);
+        b2 =  0.0;
+         //a0 is implicitly 1 and is not used directly
+        a1 = -1.0;
+        a2 =  0.0;
+      }
+      // ---
+
+/*    const float32_t _alpha_freq       = 0.998;
     const float32_t _beta_freq        = 1.0 - _alpha_freq;
     const float32_t _f_conversion     = (AUDIO_SAMPLE_RATE_EXACT / _twoPI);
     float32_t _phase_est        = 0.0;        // PLL estimated output phase
-    float32_t _lock_freq_low    = _IF_center_freq - 3000.0;
-    float32_t _lock_freq_high   = _IF_center_freq + 3000.0;
+  //  float32_t _lock_freq_low    = _IF_center_freq - 3000.0;
+  //  float32_t _lock_freq_high   = _IF_center_freq + 3000.0;
+    float32_t _lock_freq_low    = _IF_center_freq - 20.0;
+    float32_t _lock_freq_high   = _IF_center_freq + 20.0;
     float32_t _lock_phase_low   = _lock_freq_low / _f_conversion;
     float32_t _lock_phase_high  = _lock_freq_high / _f_conversion;
-    float32_t _PLLfreq          = _lock_freq_low - 2000.0;
+    float32_t _PLLfreq          = _IF_center_freq;
     boolean   _PLLisEnabled     = true;
     boolean   _SAM_PLL_isLocked = false;
     // --- PLL P-I (proportional + integral) filter design parameters
@@ -266,6 +320,7 @@ class AudioSDR : public AudioStream {
     float32_t _K_1   = _Kp + _Ki;;                        // proportional gain
     float32_t _K_2   = _Ki;                              // integral gain
     //
+    */
     // Private variables for the audio output filters
     int16_t _currentFilter;
     boolean _audio_filter_is_enabled;
@@ -300,7 +355,7 @@ class AudioSDR : public AudioStream {
     /*---------------------------------------------------*
                        --- SINE ---
       ---------------------------------------------------*/
-    float32_t sin_f32(float Phase) {
+    float32_t sin_f32(float32_t Phase) {
       const float32_t twoPI = 2.0 * PI;
       float32_t val1, val2;
       uint16_t  index, delta, intPhase;
@@ -317,7 +372,7 @@ class AudioSDR : public AudioStream {
     /*--------------------------------------------------*
                         --- COSINE ---
       --------------------------------------------------*/
-    float32_t cos_f32(float Phase) {
+    float32_t cos_f32(float32_t Phase) {
       return sin_f32(Phase + PI / 2.0);
     }
 
@@ -332,7 +387,7 @@ class AudioSDR : public AudioStream {
       return (n1 + n2 * z * z) * z;
     }
     // ---
-    float32_t approx_atan2_f32(float y, float x) {
+    float32_t approx_atan2_f32(float32_t y, float32_t x) {
       const float32_t halfPI = 0.5 * PI;
       if (x != 0.0)  {                                               // Untangle the quadrants
         if (fabsf(x) > fabsf(y)) {
@@ -372,20 +427,23 @@ class AudioSDR : public AudioStream {
      *    *   format to extract the mantissa and exponent directly from the 32 bits.        *      *
      *    *   The bit manipulation code to do this, while widely used, does not obey the    *      *
      *    *   strict parsing rules of C++ and generates a compiler warning.                 *      *
-     *    *   It may not work on all systems, but it does work on the Teensy 3.6 (with the  *      *
-     *    *   compiter warning.                                                             *      *
+     *    *   It may not work on all systems, but it does work on the Teensy 4.1 (with the  *      *
+     *    *   compiler warning.                                                             *      *
      *    ***********************************************************************************      *
       ---------------------------------------------------------------------------------------------*/
-    float32_t fast_sqrt_f32(float x, int n_iter) {
-      float32_t out;
-      const int32_t a = -0x4B0D2;
-      uint32_t val_int = *(int*)&x;   // Same bits as in the float, but as an int
-      val_int = (1 << 29) + (val_int >> 1) - (1 << 22) + a;
-      out = *(float*)&val_int;
-      // Use n_iter stages of Newton-Raphson to improve the estimate
-      for (int i = 0; i < n_iter; i++)  out = 0.5 * (out + x / out);
-      return out;
-    }
+  float32_t fast_sqrt_f32(float32_t x, int n_iter) {
+    union {float32_t f; uint32_t i; } val;
+    //
+	  val.f   = x;
+    val.i  -= 1<<23;     /* Subtract 2^m. */
+	  val.i >>= 1;		      /* Divide by 2. */
+	  val.i  += 1<<29;	    /* Add ((b + 1) / 2) * 2^m. */
+  	float32_t out = val.f;		/* Interpret again as float */
+    // Use n_iter stages of Newton-Raphson to improve the estimate
+    for (int i=0; i<n_iter; i++) out = 0.5*(out + x/out);
+    Serial.print(x,4); Serial.print("\t"); Serial.println(out,4);
+    return out;
+  }
 
     /*-----------------------------------------------------------------------------*
                     ---- FAST (APPROXIMATE) COMPLEX MAGNITUDE  ---
@@ -405,7 +463,7 @@ class AudioSDR : public AudioStream {
               true value and should be used with caution.
      *                                                                             *
        ----------------------------------------------------------------------------*/
-    float32_t approx_magnitude(float inphase, float quadrature, int crit) {
+    float32_t approx_magnitude(float32_t inphase, float32_t quadrature, int crit) {
       //         Criteria: - 0 - "Minimum RMS Error"
       //                   - 1 - "Minimum Peak Error"
       //                   - 2 - "Minimum RMS Error with Avg=0"
@@ -422,14 +480,14 @@ class AudioSDR : public AudioStream {
     /*--------------------------------------------------*
                  --- LOG2_APPROXIMATE ---
       --------------------------------------------------*/
-    float32_t log2_approx_f32(float input) {
+    float32_t log2_approx_f32(float32_t input) {
       float32_t mantissa;
       int   exponent;
       // Calculate mantissa and exponent
       mantissa = frexpf(fabsf(input), &exponent);
       // Expand using Horner's method
-      return (((1.23149591368684f * mantissa  - 4.11852516267426f) * mantissa +
-               6.02197014179219f) * mantissa - 3.13396450166353f) + exponent;
+      return (((1.23149591368684f*mantissa  - 4.11852516267426f)*mantissa +
+               6.02197014179219f)*mantissa - 3.13396450166353f) + exponent;
     }
 
     // ---
@@ -447,9 +505,9 @@ class AudioSDR : public AudioStream {
            of the complex spectrum (near the Nyquist frequency)
            will appear at the other end!
     ---------------------------------------------------------------*/
-    float32_t freq_shifter(float * _Idata, float * _Qdata, float freq_shift,  float initial_phase) {
-      const float32_t twoPI = 2.0 * PI;
-      float32_t phase_inc   = freq_shift * (twoPI / AUDIO_SAMPLE_RATE_EXACT);
+    float32_t freq_shifter(float32_t * _Idata, float32_t * _Qdata, float32_t freq_shift,  float32_t initial_phase) {
+      const float32_t twoPI = 2.0*PI;
+      float32_t phase_inc   = freq_shift*(twoPI/AUDIO_SAMPLE_RATE_EXACT);
       float32_t phase       = initial_phase;
       // Frequency shifting is a complex multiplication in the time domain:
       for (int i = 0; i < n_block; i++) {
@@ -457,10 +515,10 @@ class AudioSDR : public AudioStream {
         float32_t sine   = sin_f32(phase);
         float32_t tempI  = _Idata[i];
         float32_t tempQ  = _Qdata[i];
-        _Idata[i]     = tempI * cosine - tempQ * sine;
-        _Qdata[i]     = tempQ * cosine + tempI * sine;
-        phase       += phase_inc;
-        if (phase > twoPI)   phase -= twoPI;
+        _Idata[i]     = tempI*cosine - tempQ*sine;
+        _Qdata[i]     = tempQ*cosine + tempI*sine;
+        phase        += phase_inc;
+        if (phase > twoPI)    phase -= twoPI;
         else if (phase < 0.0) phase += twoPI;
       }
       // Return the updated phase for the next iteration
@@ -477,17 +535,17 @@ class AudioSDR : public AudioStream {
         for sinusoidal inputs, ie this an unbalanced
         modulator,
       ---------------------------------------------------*/
-    float32_t freq_mixer(float * _Idata, float * _Qdata, float freq_shift, float initial_phase) {
-      const float32_t twoPI = 2.0 * PI;
-      float32_t phase_inc   = freq_shift * (twoPI / AUDIO_SAMPLE_RATE_EXACT);
+    float32_t freq_mixer(float32_t * _Idata, float32_t * _Qdata, float32_t freq_shift, float32_t initial_phase) {
+      const float32_t twoPI = 2.0*PI;
+      float32_t phase_inc   = freq_shift*(twoPI/AUDIO_SAMPLE_RATE_EXACT);
       float32_t phase       = initial_phase;
       for (int i = 0; i < n_block; i++) {
         float32_t cosine  = cos_f32(phase);
         float32_t sine    = sin_f32(phase);
         float32_t tempI   = _Idata[i];
         float32_t tempQ   = _Qdata[i];
-        _Idata[i]         = tempI * cosine;
-        _Qdata[i]         = tempQ * sine;
+        _Idata[i]         = tempI*cosine;
+        _Qdata[i]         = tempQ*sine;
         phase            += phase_inc;
         if (phase > twoPI)   phase -= twoPI;
         else if (phase < 0.0) phase += twoPI;
@@ -598,13 +656,23 @@ class AudioSDR : public AudioStream {
     // f_cl = 150Hz, f_cu = 3900Hz, therefore F_center = sqrt(150*3900) = 764.8 Hz ( 0.0347)
     // BW = 0.2071
     // (each row is one filter section)  b0, b1, b2, -a1, -a2
-    float32_t bw3900_coefs[20] = {
+/*    float32_t bw3900_coefs[20] = {
       0.373595243140580457, -0.747172867264591645, 0.373595243140580513, 1.953498342031101180, -0.954306129294667182,
       0.200355752945732990, -0.056823132076542736, 0.200355752945732990, 1.387493286008134600, -0.511785753662859055,
       0.301862290603145733, -0.603722064882966314, 0.301862290603145733, 1.989138866602465190, -0.989604616247514612,
       0.237955827945548121,  0.294690213886068364, 0.237955827945548121, 1.529548307358015610, -0.780098055068093932
     };
-    // ---
+*/    // ---
+  // Audio post-demod 3.3 kHz) BPF filter coefficients  (Iowa Hills, 8th-order (4 SOS sections), Elliptic,
+    // f_cl = 150Hz, f_cu = 3300Hz, therefore F_center = sqrt(150*3300) = 703.56 Hz (0.0319)
+    // BW = 0.17325
+    // (each row is one filter section)  b0, b1, b2, -a1, -a2
+      float32_t bw3900_coefs[20] = {
+      0.353920065440475107, -0.707767204392513949,  0.353920065440475218, 1.907327579454288770, -0.910885606808396364,
+      0.210138011165721283, -0.061492481758256348,  0.210138011165721283, 1.418975913152688890, -0.540833110369071779,
+      0.296168258557784725, -0.592325651893045868,  0.296168258557784725, 1.978620798792404490, -0.980520372466094026,
+      0.238470923312072175,  0.292902587911490098,  0.238470923312072175, 1.524508916187725880, -0.789502560763665206
+    };
     // Audio post-demod CW (400 Hz) BPF filter coefficients  (Iowa Hills, 8th-order (4 SOS sections), Elliptic,
     // f_c = 0.0351 (774 Hz), BW = 0.02160 (476 Hz)
     // (each row is one filter section)  b0, b1, b2, -a1, -a2
